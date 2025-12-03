@@ -10,4 +10,4 @@ aiohttp
 aiofiles
 telegraph
 speedtest-cli
-uvloop
+umongo==3.1.0
