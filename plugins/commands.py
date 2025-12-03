@@ -220,8 +220,8 @@ async def start(client, message):
     await vp.delete()
     await vp.reply("Tʜᴇ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ ɢᴏɴᴇ ! Cʟɪᴄᴋ ɢɪᴠᴇɴ ʙᴜᴛᴛᴏɴ ᴛᴏ ɢᴇᴛ ɪᴛ ᴀɢᴀɪɴ.", reply_markup=InlineKeyboardMarkup(btns))
     
- @Client.on_message(filters.command('link'))
- async def link(bot, message):
+@Client.on_message(filters.command('link'))
+async def link(bot, message):
      msg = message.reply_to_message
      if not msg:
          return await message.reply('Reply to media')
