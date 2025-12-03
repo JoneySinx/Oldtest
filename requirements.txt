@@ -2,7 +2,7 @@ pyrofork==2.3.43
 tgcrypto
 motor
 marshmallow
-umongo
+umongo==3.1.0
 pymongo
 pytz
 cinemagoer
