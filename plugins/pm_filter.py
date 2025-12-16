@@ -1,16 +1,25 @@
 import asyncio
 import re
-from time import time as time_now
 import math
-from pyrogram.errors.exceptions.bad_request_400 import MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
-from Script import script
+from time import time as time_now
 from datetime import datetime, timedelta
-from info import ADMINS, URL, MAX_BTN, BIN_CHANNEL, IS_STREAM, DELETE_TIME, FILMS_LINK, LOG_CHANNEL, SUPPORT_GROUP, SUPPORT_LINK, UPDATES_LINK, LANGUAGES, PAYMENT_QR, QUALITY, OWNER_UPI_ID, OWNER_USERNAME
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
+
 from pyrogram import Client, filters, enums
-from utils import get_size, is_subscribed, is_check_admin, get_wish, get_shortlink, get_readable_time, get_poster, temp, get_settings, save_group_settings
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
+from pyrogram.errors.exceptions.bad_request_400 import MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
+
+from Script import script
+from info import (
+    ADMINS, URL, MAX_BTN, BIN_CHANNEL, IS_STREAM, DELETE_TIME, FILMS_LINK, 
+    LOG_CHANNEL, SUPPORT_GROUP, UPDATES_LINK, LANGUAGES, PAYMENT_QR, 
+    QUALITY, OWNER_UPI_ID, OWNER_USERNAME
+)
+from utils import (
+    get_size, is_subscribed, is_check_admin, get_wish, get_shortlink, 
+    get_readable_time, get_poster, temp, get_settings, save_group_settings
+)
 from database.users_chats_db import db
-from database.ia_filterdb import Media, get_search_results,delete_files
+from database.ia_filterdb import Media, get_search_results, delete_files
 
 BUTTONS = {}
 CAP = {}
@@ -22,10 +31,10 @@ async def pm_search(client, message):
     btn = [[
         InlineKeyboardButton("🗂 ᴄʟɪᴄᴋ ʜᴇʀᴇ 🗂", url=FILMS_LINK)
     ]]
-    reply_markup=InlineKeyboardMarkup(btn)
+    reply_markup = InlineKeyboardMarkup(btn)
     if await db.get_pm_search_status(bot_id):
         s = await message.reply(f"<b><i>⚠️ `{message.text}` 🔍</i></b>", quote=True)
-        if 'hindi' in message.text.lower() or 'tamil' in message.text.lower() or 'telugu' in message.text.lower() or 'malayalam' in message.text.lower() or 'kannada' in message.text.lower() or 'english' in message.text.lower() or 'gujarati' in message.text.lower(): 
+        if any(lang in message.text.lower() for lang in ['hindi', 'tamil', 'telugu', 'malayalam', 'kannada', 'english', 'gujarati']): 
             return await auto_filter(client, message, s)
         await auto_filter(client, message, s)
     else:
@@ -43,18 +52,22 @@ async def group_search(client, message):
             return
     except:
         return
+    
     if not await db.get_chat(message.chat.id):
         total = int(message.chat.members_count)
         username = f'@{message.chat.username}' if message.chat.username else vp.invite_link
-        await client.send_message(LOG_CHANNEL, script.NEW_GROUP_TXT.format(message.chat.title, message.chat.id, username, total))       
+        await client.send_message(LOG_CHANNEL, script.NEW_GROUP_TXT.format(message.chat.title, message.chat.id, username, total))        
         await db.add_chat(message.chat.id, message.chat.title)
+    
     chat_id = message.chat.id
     settings = await get_settings(chat_id)
     user_id = message.from_user.id if message and message.from_user else 0
+    
     if settings["auto_filter"]:
         if not user_id:
             await message.reply("I'm not working for anonymous admin!")
             return
+        
         if message.chat.id == SUPPORT_GROUP:
             files, offset, total = await get_search_results(message.text)
             if files:
@@ -75,19 +88,16 @@ async def group_search(client, message):
                 if not member.user.is_bot:
                     admins.append(member.user.id)
                     if member.status == enums.ChatMemberStatus.OWNER:
-                        if message.reply_to_message:
-                            try:
+                        try:
+                            if message.reply_to_message:
                                 sent_msg = await message.reply_to_message.forward(member.user.id)
                                 await sent_msg.reply_text(f"#Attention\n★ User: {message.from_user.mention}\n★ Group: {message.chat.title}\n\n★ <a href={message.reply_to_message.link}>Go to message</a>", disable_web_page_preview=True)
-                            except:
-                                pass
-                        else:
-                            try:
+                            else:
                                 sent_msg = await message.forward(member.user.id)
                                 await sent_msg.reply_text(f"#Attention\n★ User: {message.from_user.mention}\n★ Group: {message.chat.title}\n\n★ <a href={message.link}>Go to message</a>", disable_web_page_preview=True)
-                            except:
-                                pass
-            hidden_mentions = (f'[\u2064](tg://user?id={user_id})' for user_id in admins)
+                        except:
+                            pass
+            hidden_mentions = (f'[\u2064](tg://user?id={uid})' for uid in admins)
             await message.reply_text('Report sent!' + ''.join(hidden_mentions))
             return
 
@@ -146,13 +156,15 @@ async def next_page(bot, query):
     if settings['links']:
         btn = []
         for file_num, file in enumerate(files, start=offset+1):
-            files_link += f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            new_link = f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            if len(files_link) + len(new_link) + len(cap) > 3900:
+                break
+            files_link += new_link
     else:
         btn = [[
             InlineKeyboardButton(text=f"📂 {get_size(file.file_size)} {file.file_name}", callback_data=f'file#{file.file_id}')
-        ]
-            for file in files
-        ]
+        ] for file in files]
+
     if settings['shortlink'] and not await db.has_premium_access(query.from_user.id):
         btn.insert(0,
             [InlineKeyboardButton("📰 ʟᴀɴɢᴜᴀɢᴇs", callback_data=f"languages#{key}#{req}#{offset}"),
@@ -242,13 +254,15 @@ async def filter_languages_cb_handler(client: Client, query: CallbackQuery):
     if settings['links']:
         btn = []
         for file_num, file in enumerate(files, start=1):
-            files_link += f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            new_link = f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            if len(files_link) + len(new_link) + len(cap) > 3900:
+                break
+            files_link += new_link
     else:
         btn = [[
             InlineKeyboardButton(text=f"📂 {get_size(file.file_size)} {file.file_name}", callback_data=f'file#{file.file_id}')
-        ]
-            for file in files
-        ]
+        ] for file in files]
+
     if settings['shortlink'] and not await db.has_premium_access(query.from_user.id):
         btn.insert(0,[
             InlineKeyboardButton("🥇 ʙᴜʏ 🥇", url=f"https://t.me/{temp.U_NAME}?start=plans")
@@ -302,13 +316,15 @@ async def lang_next_page(bot, query):
     if settings['links']:
         btn = []
         for file_num, file in enumerate(files, start=l_offset+1):
-            files_link += f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            new_link = f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            if len(files_link) + len(new_link) + len(cap) > 3900:
+                break
+            files_link += new_link
     else:
         btn = [[
             InlineKeyboardButton(text=f"✨ {get_size(file.file_size)} ⚡️ {file.file_name}", callback_data=f'file#{file.file_id}')
-        ]
-            for file in files
-        ]
+        ] for file in files]
+
     if settings['shortlink'] and not await db.has_premium_access(query.from_user.id):
         btn.insert(0,[
             InlineKeyboardButton("🥇 ʙᴜʏ 🥇", url=f"https://t.me/{temp.U_NAME}?start=plans")
@@ -371,13 +387,15 @@ async def quality_search(client: Client, query: CallbackQuery):
     if settings['links']:
         btn = []
         for file_num, file in enumerate(files, start=1):
-            files_link += f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            new_link = f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            if len(files_link) + len(new_link) + len(cap) > 3900:
+                break
+            files_link += new_link
     else:
         btn = [[
             InlineKeyboardButton(text=f"📂 {get_size(file.file_size)} {file.file_name}", callback_data=f'file#{file.file_id}')
-        ]
-            for file in files
-        ]
+        ] for file in files]
+
     if settings['shortlink'] and not await db.has_premium_access(query.from_user.id):
         btn.insert(0,
             [InlineKeyboardButton("♻️ sᴇɴᴅ ᴀʟʟ ♻️", url=await get_shortlink(settings['url'], settings['api'], f'https://t.me/{temp.U_NAME}?start=all_{query.message.chat.id}_{key}')),
@@ -424,13 +442,15 @@ async def quality_next_page(bot, query):
     if settings['links']:
         btn = []
         for file_num, file in enumerate(files, start=l_offset+1):
-            files_link += f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            new_link = f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{query.message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            if len(files_link) + len(new_link) + len(cap) > 3900:
+                break
+            files_link += new_link
     else:
         btn = [[
             InlineKeyboardButton(text=f"✨ {get_size(file.file_size)} ⚡️ {file.file_name}", callback_data=f'file#{file.file_id}')
-        ]
-            for file in files
-        ]
+        ] for file in files]
+
     if settings['shortlink'] and not await db.has_premium_access(query.from_user.id):
         btn.insert(0,
             [InlineKeyboardButton("♻️ sᴇɴᴅ ᴀʟʟ ♻️", url=await get_shortlink(settings['url'], settings['api'], f'https://t.me/{temp.U_NAME}?start=all_{query.message.chat.id}_{key}')),
@@ -545,11 +565,11 @@ async def cb_handler(client: Client, query: CallbackQuery):
         free_trial_status = await db.get_free_trial_status(user_id)
         if not free_trial_status:            
             await db.give_free_trail(user_id)
-            new_text = "**ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ꜰʀᴇᴇ ᴛʀᴀɪʟ ꜰᴏʀ 5 ᴍɪɴᴜᴛᴇs ꜰʀᴏᴍ ɴᴏᴡ 😀\n\nआप अब से 5 मिनट के लिए निःशुल्क ट्रायल का उपयोग कर सकते हैं 😀**"        
+            new_text = "**ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ꜰʀᴇᴇ ᴛʀɪᴀʟ ꜰᴏʀ 5 ᴍɪɴᴜᴛᴇs ꜰʀᴏᴍ ɴᴏᴡ 😀\n\nआप अब से 5 मिनट के लिए निःशुल्क ट्रायल का उपयोग कर सकते हैं 😀**"        
             await query.message.edit_text(text=new_text)
             return
         else:
-            new_text= "**🤣 you already used free now no more free trail. please buy subscription here are our 👉 /plans**"
+            new_text= "**🤣 you already used free now no more free trial. please buy subscription here are our 👉 /plans**"
             await query.message.edit_text(text=new_text)
             return
                 
@@ -899,27 +919,32 @@ async def auto_filter(client, msg, s, spoll=False):
         files, offset, total_results = await get_search_results(search)
         if not files:
             if settings["spell_check"]:
-                await advantage_spell_chok(message, s)
+                await advantage_spell_check(message, s)
             return
     else:
         settings = await get_settings(msg.message.chat.id)
         message = msg.message.reply_to_message  # msg will be callback query
         search, files, offset, total_results = spoll
+    
     req = message.from_user.id if message and message.from_user else 0
     key = f"{message.chat.id}-{message.id}"
     temp.FILES[key] = files
     BUTTONS[key] = search
     files_link = ""
+    
     if settings['links']:
         btn = []
         for file_num, file in enumerate(files, start=1):
-            files_link += f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            new_link = f"""<b>\n\n📁 <a href=https://t.me/{temp.U_NAME}?start=file_{message.chat.id}_{file.file_id}>[{get_size(file.file_size)}] {file.file_name}</a></b>"""
+            # Check length limit before adding
+            if len(cap if 'cap' in locals() else '') + len(files_link) + len(new_link) > 3900:
+                break
+            files_link += new_link
     else:
         btn = [[
             InlineKeyboardButton(text=f"📂 {get_size(file.file_size)} {file.file_name}", callback_data=f'file#{file.file_id}')
-        ]
-            for file in files
-        ]   
+        ] for file in files]
+   
     if offset != "":
         if settings['shortlink'] and not await db.has_premium_access(message.from_user.id):
             btn.insert(0,
@@ -948,44 +973,52 @@ async def auto_filter(client, msg, s, spoll=False):
                 [InlineKeyboardButton("♻️ sᴇɴᴅ ᴀʟʟ ♻️", callback_data=f"send_all#{key}#{req}"),
                 InlineKeyboardButton("🥇 ʙᴜʏ 🥇", url=f"https://t.me/{temp.U_NAME}?start=plans")]
             )
+            
     imdb = await get_poster(search, file=(files[0]).file_name) if settings["imdb"] else None
     TEMPLATE = settings['template']
+    
     if imdb:
-        cap = TEMPLATE.format(
-            query=search,
-            title=imdb['title'],
-            votes=imdb['votes'],
-            aka=imdb["aka"],
-            seasons=imdb["seasons"],
-            box_office=imdb['box_office'],
-            localized_title=imdb['localized_title'],
-            kind=imdb['kind'],
-            imdb_id=imdb["imdb_id"],
-            cast=imdb["cast"],
-            runtime=imdb["runtime"],
-            countries=imdb["countries"],
-            certificates=imdb["certificates"],
-            languages=imdb["languages"],
-            director=imdb["director"],
-            writer=imdb["writer"],
-            producer=imdb["producer"],
-            composer=imdb["composer"],
-            cinematographer=imdb["cinematographer"],
-            music_team=imdb["music_team"],
-            distributors=imdb["distributors"],
-            release_date=imdb['release_date'],
-            year=imdb['year'],
-            genres=imdb['genres'],
-            poster=imdb['poster'],
-            plot=imdb['plot'],
-            rating=imdb['rating'],
-            url=imdb['url'],
-            **locals()
-        )
+        # Improved formatting to avoid crashes
+        try:
+            cap = TEMPLATE.format(
+                query=search,
+                title=imdb.get('title', 'N/A'),
+                votes=imdb.get('votes', 'N/A'),
+                aka=imdb.get("aka", 'N/A'),
+                seasons=imdb.get("seasons", 'N/A'),
+                box_office=imdb.get('box_office', 'N/A'),
+                localized_title=imdb.get('localized_title', 'N/A'),
+                kind=imdb.get('kind', 'N/A'),
+                imdb_id=imdb.get("imdb_id", 'N/A'),
+                cast=imdb.get("cast", 'N/A'),
+                runtime=imdb.get("runtime", 'N/A'),
+                countries=imdb.get("countries", 'N/A'),
+                certificates=imdb.get("certificates", 'N/A'),
+                languages=imdb.get("languages", 'N/A'),
+                director=imdb.get("director", 'N/A'),
+                writer=imdb.get("writer", 'N/A'),
+                producer=imdb.get("producer", 'N/A'),
+                composer=imdb.get("composer", 'N/A'),
+                cinematographer=imdb.get("cinematographer", 'N/A'),
+                music_team=imdb.get("music_team", 'N/A'),
+                distributors=imdb.get("distributors", 'N/A'),
+                release_date=imdb.get('release_date', 'N/A'),
+                year=imdb.get('year', 'N/A'),
+                genres=imdb.get('genres', 'N/A'),
+                poster=imdb.get('poster', ''),
+                plot=imdb.get('plot', 'N/A'),
+                rating=imdb.get('rating', 'N/A'),
+                url=imdb.get('url', 'N/A'),
+                **locals()
+            )
+        except Exception:
+            cap = f"<b>✅ Search Results:- {search}\n🦹 Requested By {message.from_user.mention}\n⚡ Powered By:- {message.chat.title} \n🎬 Total File Found :- {total_results}</b>"
     else:
         cap = f"<b>✅ Search Results:- {search}\n🦹 Requested By {message.from_user.mention}\n⚡ Powered By:- {message.chat.title} \n🎬 Total File Found :- {total_results}</b>"
+    
     CAP[key] = cap
     del_msg = f"\n\n<b>⚠️ ᴛʜɪs ᴍᴇssᴀɢᴇ ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏ ᴅᴇʟᴇᴛᴇ ᴀꜰᴛᴇʀ <code>{get_readable_time(DELETE_TIME)}</code> ᴛᴏ ᴀᴠᴏɪᴅ ᴄᴏᴘʏʀɪɢʜᴛ ɪssᴜᴇs</b>" if settings["auto_delete"] else ''
+    
     if imdb and imdb.get('poster'):
         await s.delete()
         try:
@@ -1000,14 +1033,21 @@ async def auto_filter(client, msg, s, spoll=False):
         except (MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty):
             pic = imdb.get('poster')
             poster = pic.replace('.jpg', "._V1_UX360.jpg")
-            k = await message.reply_photo(photo=poster, caption=cap[:1024] + files_link + del_msg, reply_markup=InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML, quote=True)
-            if settings["auto_delete"]:
-                await asyncio.sleep(DELETE_TIME)
-                await k.delete()
-                try:
-                    await message.delete()
-                except:
-                    pass
+            try:
+                k = await message.reply_photo(photo=poster, caption=cap[:1024] + files_link + del_msg, reply_markup=InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML, quote=True)
+                if settings["auto_delete"]:
+                    await asyncio.sleep(DELETE_TIME)
+                    await k.delete()
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+            except Exception:
+                # Fallback to text if photo fails
+                k = await message.reply_text(cap + files_link + del_msg, reply_markup=InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML, quote=True)
+                if settings["auto_delete"]:
+                    await asyncio.sleep(DELETE_TIME)
+                    await k.delete()
         except Exception as e:
             k = await message.reply_text(cap + files_link + del_msg, reply_markup=InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML, quote=True)
             if settings["auto_delete"]:
@@ -1027,7 +1067,7 @@ async def auto_filter(client, msg, s, spoll=False):
             except:
                 pass
 
-async def advantage_spell_chok(message, s):
+async def advantage_spell_check(message, s):
     search = message.text
     google_search = search.replace(" ", "+")
     btn = [[
@@ -1070,4 +1110,3 @@ async def advantage_spell_chok(message, s):
         await message.delete()
     except:
         pass
-
