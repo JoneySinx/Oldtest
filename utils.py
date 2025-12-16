@@ -1,15 +1,17 @@
-from pyrogram.errors import UserNotParticipant, FloodWait
-from info import LONG_IMDB_DESCRIPTION
-from imdb import Cinemagoer
+import logging
 import asyncio
+import re
+import pytz
+from datetime import datetime
+from pyrogram.errors import UserNotParticipant, FloodWait
 from pyrogram.types import InlineKeyboardButton
 from pyrogram import enums
-import pytz
-import re
-from datetime import datetime
+from imdb import Cinemagoer
+from info import LONG_IMDB_DESCRIPTION
 from database.users_chats_db import db
 from shortzy import Shortzy
 
+# Initialize Cinemagoer (IMDb)
 imdb = Cinemagoer() 
 
 class temp(object):
@@ -30,93 +32,112 @@ class temp(object):
 async def is_subscribed(bot, query, channel):
     btn = []
     for id in channel:
-        chat = await bot.get_chat(int(id))
         try:
-            await bot.get_chat_member(id, query.from_user.id)
-        except UserNotParticipant:
-            btn.append(
-                [InlineKeyboardButton(f'Join {chat.title}', url=chat.invite_link)]
-            )
+            chat = await bot.get_chat(int(id))
+            try:
+                await bot.get_chat_member(id, query.from_user.id)
+            except UserNotParticipant:
+                btn.append(
+                    [InlineKeyboardButton(f'Join {chat.title}', url=chat.invite_link)]
+                )
+            except Exception as e:
+                pass
         except Exception as e:
+            print(f"Error in is_subscribed: {e}")
             pass
     return btn
 
 async def get_poster(query, bulk=False, id=False, file=None):
-    if not id:
-        query = (query.strip()).lower()
-        title = query
-        year = re.findall(r'[1-2]\d{3}$', query, re.IGNORECASE)
-        if year:
-            year = list_to_str(year[:1])
-            title = (query.replace(year, "")).strip()
-        elif file is not None:
-            year = re.findall(r'[1-2]\d{3}', file, re.IGNORECASE)
+    try:
+        if not id:
+            query = (query.strip()).lower()
+            title = query
+            year = re.findall(r'[1-2]\d{3}$', query, re.IGNORECASE)
             if year:
-                year = list_to_str(year[:1]) 
-        else:
-            year = None
-        movieid = imdb.search_movie(title.lower(), results=10)
-        if not movieid:
-            return None
-        if year:
-            filtered=list(filter(lambda k: str(k.get('year')) == str(year), movieid))
-            if not filtered:
+                year = list_to_str(year[:1])
+                title = (query.replace(year, "")).strip()
+            elif file is not None:
+                year = re.findall(r'[1-2]\d{3}', file, re.IGNORECASE)
+                if year:
+                    year = list_to_str(year[:1]) 
+            else:
+                year = None
+            
+            # Search Movie
+            movieid = imdb.search_movie(title.lower(), results=10)
+            if not movieid:
+                return None
+            
+            if year:
+                filtered = list(filter(lambda k: str(k.get('year')) == str(year), movieid))
+                if not filtered:
+                    filtered = movieid
+            else:
                 filtered = movieid
+            
+            movieid = list(filter(lambda k: k.get('kind') in ['movie', 'tv series'], filtered))
+            if not movieid:
+                movieid = filtered
+            
+            if bulk:
+                return movieid
+            
+            movieid = movieid[0].movieID
         else:
-            filtered = movieid
-        movieid=list(filter(lambda k: k.get('kind') in ['movie', 'tv series'], filtered))
-        if not movieid:
-            movieid = filtered
-        if bulk:
-            return movieid
-        movieid = movieid[0].movieID
-    else:
-        movieid = query
-    movie = imdb.get_movie(movieid)
-    if movie.get("original air date"):
-        date = movie["original air date"]
-    elif movie.get("year"):
-        date = movie.get("year")
-    else:
-        date = "N/A"
-    plot = ""
-    if not LONG_IMDB_DESCRIPTION:
-        plot = movie.get('plot')
-        if plot and len(plot) > 0:
-            plot = plot[0]
-    else:
-        plot = movie.get('plot outline')
-    if plot and len(plot) > 800:
-        plot = plot[0:800] + "..."
-    return {
-        'title': movie.get('title'),
-        'votes': movie.get('votes'),
-        "aka": list_to_str(movie.get("akas")),
-        "seasons": movie.get("number of seasons"),
-        "box_office": movie.get('box office'),
-        'localized_title': movie.get('localized title'),
-        'kind': movie.get("kind"),
-        "imdb_id": f"tt{movie.get('imdbID')}",
-        "cast": list_to_str(movie.get("cast")),
-        "runtime": list_to_str(movie.get("runtimes")),
-        "countries": list_to_str(movie.get("countries")),
-        "certificates": list_to_str(movie.get("certificates")),
-        "languages": list_to_str(movie.get("languages")),
-        "director": list_to_str(movie.get("director")),
-        "writer":list_to_str(movie.get("writer")),
-        "producer":list_to_str(movie.get("producer")),
-        "composer":list_to_str(movie.get("composer")) ,
-        "cinematographer":list_to_str(movie.get("cinematographer")),
-        "music_team": list_to_str(movie.get("music department")),
-        "distributors": list_to_str(movie.get("distributors")),
-        'release_date': date,
-        'year': movie.get('year'),
-        'genres': list_to_str(movie.get("genres")),
-        'poster': movie.get('full-size cover url'),
-        'plot': plot,
-        'rating': str(movie.get("rating")),
-        'url':f'https://www.imdb.com/title/tt{movieid}'
-    }
+            movieid = query
+        
+        movie = imdb.get_movie(movieid)
+        
+        if movie.get("original air date"):
+            date = movie["original air date"]
+        elif movie.get("year"):
+            date = movie.get("year")
+        else:
+            date = "N/A"
+            
+        plot = ""
+        if not LONG_IMDB_DESCRIPTION:
+            plot = movie.get('plot')
+            if plot and len(plot) > 0:
+                plot = plot[0]
+        else:
+            plot = movie.get('plot outline')
+            
+        if plot and len(plot) > 800:
+            plot = plot[0:800] + "..."
+            
+        return {
+            'title': movie.get('title'),
+            'votes': movie.get('votes'),
+            "aka": list_to_str(movie.get("akas")),
+            "seasons": movie.get("number of seasons"),
+            "box_office": movie.get('box office'),
+            'localized_title': movie.get('localized title'),
+            'kind': movie.get("kind"),
+            "imdb_id": f"tt{movie.get('imdbID')}",
+            "cast": list_to_str(movie.get("cast")),
+            "runtime": list_to_str(movie.get("runtimes")),
+            "countries": list_to_str(movie.get("countries")),
+            "certificates": list_to_str(movie.get("certificates")),
+            "languages": list_to_str(movie.get("languages")),
+            "director": list_to_str(movie.get("director")),
+            "writer": list_to_str(movie.get("writer")),
+            "producer": list_to_str(movie.get("producer")),
+            "composer": list_to_str(movie.get("composer")),
+            "cinematographer": list_to_str(movie.get("cinematographer")),
+            "music_team": list_to_str(movie.get("music department")),
+            "distributors": list_to_str(movie.get("distributors")),
+            'release_date': date,
+            'year': movie.get('year'),
+            'genres': list_to_str(movie.get("genres")),
+            'poster': movie.get('full-size cover url'),
+            'plot': plot,
+            'rating': str(movie.get("rating")),
+            'url': f'https://www.imdb.com/title/tt{movieid}'
+        }
+    except Exception as e:
+        print(f"IMDb Error: {e}")
+        return None
 
 async def is_check_admin(bot, chat_id, user_id):
     try:
@@ -141,7 +162,7 @@ async def update_verify_status(user_id, verify_token="", is_verified=False, veri
     current['expire_time'] = expire_time
     temp.VERIFICATIONS[user_id] = current
     await db.update_verify_status(user_id, current)
-      
+       
 async def broadcast_messages(user_id, message, pin):
     try:
         m = await message.copy(chat_id=user_id)
@@ -202,9 +223,13 @@ def list_to_str(k):
         return ', '.join(f'{elem}' for elem in k)
     
 async def get_shortlink(url, api, link):
-    shortzy = Shortzy(api_key=api, base_site=url)
-    link = await shortzy.convert(link)
-    return link
+    try:
+        shortzy = Shortzy(api_key=api, base_site=url)
+        link = await shortzy.convert(link)
+        return link
+    except Exception as e:
+        print(f"Shortlink Error: {e}")
+        return link
 
 def get_readable_time(seconds):
     periods = [('d', 86400), ('h', 3600), ('m', 60), ('s', 1)]
@@ -213,7 +238,7 @@ def get_readable_time(seconds):
         if seconds >= period_seconds:
             period_value, seconds = divmod(seconds, period_seconds)
             result += f'{int(period_value)}{period_name}'
-    return result
+    return result if result else '0s'
 
 def get_wish():
     tz = pytz.timezone('Asia/Colombo')
@@ -239,18 +264,20 @@ async def get_seconds(time_string):
         if value:
             value = int(value)
         return value, unit
+    
     value, unit = extract_value_and_unit(time_string)
-    if unit == 's':
+    
+    if unit in ['s', 'sec', 'secs']:
         return value
-    elif unit == 'min':
+    elif unit in ['min', 'mins', 'm']:
         return value * 60
-    elif unit == 'hour':
+    elif unit in ['hour', 'hours', 'h']:
         return value * 3600
-    elif unit == 'day':
+    elif unit in ['day', 'days', 'd']:
         return value * 86400
-    elif unit == 'month':
+    elif unit in ['month', 'months']:
         return value * 86400 * 30
-    elif unit == 'year':
+    elif unit in ['year', 'years']:
         return value * 86400 * 365
     else:
         return 0
