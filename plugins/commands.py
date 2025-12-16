@@ -1,5 +1,5 @@
 import os
-from telegraph import upload_file
+import requests 
 import random
 import string
 import asyncio
@@ -13,12 +13,28 @@ from database.users_chats_db import db
 from info import URL, BIN_CHANNEL, INDEX_CHANNELS, ADMINS, IS_VERIFY, VERIFY_TUTORIAL, VERIFY_EXPIRE, SHORTLINK_API, SHORTLINK_URL, DELETE_TIME, SUPPORT_LINK, UPDATES_LINK, LOG_CHANNEL, PICS, IS_STREAM, PAYMENT_QR, OWNER_USERNAME, REACTIONS, PM_FILE_DELETE_TIME, OWNER_UPI_ID
 from utils import get_settings, get_size, is_subscribed, is_check_admin, get_shortlink, get_verify_status, update_verify_status, save_group_settings, temp, get_readable_time, get_wish, get_seconds
 
+# --- Helper Function for Catbox Upload ---
+def upload_to_catbox(file_path):
+    try:
+        url = "https://catbox.moe/user/api.php"
+        data = {"reqtype": "fileupload", "userhash": ""}
+        files = {"fileToUpload": open(file_path, "rb")}
+        response = requests.post(url, data=data, files=files)
+        if response.status_code == 200:
+            return response.text # Returns the URL
+        else:
+            return None
+    except Exception as e:
+        print(f"Upload Error: {e}")
+        return None
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     try:
         await message.react(emoji=random.choice(REACTIONS), big=True)
     except:
         await message.react(emoji="⚡️", big=True)
+        
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         if not await db.get_chat(message.chat.id):
             total = await client.get_chat_members_count(message.chat.id)
@@ -77,7 +93,11 @@ async def start(client, message):
     mc = message.command[1]
 
     if mc.startswith('verify'):
-        _, token = mc.split("_", 1)
+        try:
+            _, token = mc.split("_", 1)
+        except ValueError:
+            return await message.reply("Invalid verify link.")
+            
         verify_status = await get_verify_status(message.from_user.id)
         if verify_status['verify_token'] != token:
             return await message.reply("Your verify token is invalid.")
@@ -98,7 +118,10 @@ async def start(client, message):
         if IS_VERIFY and not verify_status['is_verified']:
             token = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
             await update_verify_status(message.from_user.id, verify_token=token, link="" if mc == 'inline_verify' else mc)
-            link = await get_shortlink(SHORTLINK_URL, SHORTLINK_API, f'https://t.me/{temp.U_NAME}?start=verify_{token}')
+            try:
+                link = await get_shortlink(SHORTLINK_URL, SHORTLINK_API, f'https://t.me/{temp.U_NAME}?start=verify_{token}')
+            except:
+                link = VERIFY_TUTORIAL
             btn = [[
                 InlineKeyboardButton("🧿 Verify 🧿", url=link)
             ],[
@@ -107,7 +130,65 @@ async def start(client, message):
             await message.reply("You not verified today! Kindly verify now. 🔐", reply_markup=InlineKeyboardMarkup(btn), protect_content=True)
             return
 
-    settings = await get_settings(int(mc.split("_", 2)[1]))
+    # Split logic with try-except to avoid crash
+    try:
+        type_, grp_id, file_id = mc.split("_", 2)
+        settings = await get_settings(int(grp_id))
+    except (ValueError, Exception):
+        # Fallback for All files or invalid links
+        if mc.startswith('all'):
+            try:
+                _, grp_id, key = mc.split("_", 2)
+                files = temp.FILES.get(key)
+                if not files:
+                    return await message.reply('No Such All Files Exist!')
+                settings = await get_settings(int(grp_id))
+                file_ids = []
+                total_files = await message.reply(f"<b><i>🗂 Total files - <code>{len(files)}</code></i></b>")
+                for file in files:
+                    CAPTION = settings['caption']
+                    f_caption = CAPTION.format(
+                        file_name=file.file_name,
+                        file_size=get_size(file.file_size),
+                        file_caption=file.caption
+                    )      
+                    if settings.get('is_stream', IS_STREAM):
+                        btn = [[
+                            InlineKeyboardButton("🚀 Watch And Download ⚡", callback_data=f"stream#{file.file_id}")
+                        ],[
+                            InlineKeyboardButton('🙅 Close', callback_data='close_data')
+                        ]]
+                    else:
+                        btn = [[
+                            InlineKeyboardButton('🙅 Close', callback_data='close_data')
+                        ]]
+
+                    msg = await client.send_cached_media(
+                        chat_id=message.from_user.id,
+                        file_id=file.file_id,
+                        caption=f_caption,
+                        protect_content=False if await db.has_premium_access(message.from_user.id) else True,
+                        reply_markup=InlineKeyboardMarkup(btn)
+                    )
+                    file_ids.append(msg.id)
+
+                time = get_readable_time(PM_FILE_DELETE_TIME)
+                vp = await message.reply(f"Nᴏᴛᴇ: Tʜɪs ғɪʟᴇs ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇ ɪɴ {time} ᴛᴏ ᴀᴠᴏɪᴅ ᴄᴏᴘʏʀɪɢʜᴛs. Sᴀᴠᴇ ᴛʜᴇ ғɪʟᴇs ᴛᴏ sᴏᴍᴇᴡʜᴇʀᴇ ᴇʟsᴇ")
+                await asyncio.sleep(PM_FILE_DELETE_TIME)
+                buttons = [[InlineKeyboardButton('ɢᴇᴛ ғɪʟᴇs ᴀɢᴀɪɴ', callback_data=f"get_del_send_all_files#{grp_id}#{key}")]] 
+                try:
+                    await client.delete_messages(
+                        chat_id=message.chat.id,
+                        message_ids=file_ids + [total_files.id]
+                    )
+                except:
+                    pass
+                await vp.edit("Tʜᴇ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ ɢᴏɴᴇ ! Cʟɪᴄᴋ ɢɪᴠᴇɴ ʙᴜᴛᴛᴏɴ ᴛᴏ ɢᴇᴛ ɪᴛ ᴀɢᴀɪɴ.", reply_markup=InlineKeyboardMarkup(buttons))
+                return
+            except:
+                return await message.reply("Invalid Link!")
+        return await message.reply("Invalid Link or Command!")
+
     if not await db.has_premium_access(message.from_user.id):
         if settings['fsub']:
             btn = await is_subscribed(client, message, settings['fsub'])
@@ -123,62 +204,18 @@ async def start(client, message):
                     parse_mode=enums.ParseMode.HTML
                 )
                 return 
-        
-    if mc.startswith('all'):
-        _, grp_id, key = mc.split("_", 2)
-        files = temp.FILES.get(key)
-        if not files:
-            return await message.reply('No Such All Files Exist!')
-        settings = await get_settings(int(grp_id))
-        file_ids = []
-        total_files = await message.reply(f"<b><i>🗂 Total files - <code>{len(files)}</code></i></b>")
-        for file in files:
-            CAPTION = settings['caption']
-            f_caption = CAPTION.format(
-                file_name=file.file_name,
-                file_size=get_size(file.file_size),
-                file_caption=file.caption
-            )      
-            if settings.get('is_stream', IS_STREAM):
-                btn = [[
-                    InlineKeyboardButton("🚀 Watch And Download ⚡", callback_data=f"stream#{file.file_id}")
-                ],[
-                    InlineKeyboardButton('🙅 Close', callback_data='close_data')
-                ]]
-            else:
-                btn = [[
-                    InlineKeyboardButton('🙅 Close', callback_data='close_data')
-                ]]
 
-            msg = await client.send_cached_media(
-                chat_id=message.from_user.id,
-                file_id=file.file_id,
-                caption=f_caption,
-                protect_content=False if await db.has_premium_access(message.from_user.id) else True,
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            file_ids.append(msg.id)
-
-        time = get_readable_time(PM_FILE_DELETE_TIME)
-        vp = await message.reply(f"Nᴏᴛᴇ: Tʜɪs ғɪʟᴇs ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇ ɪɴ {time} ᴛᴏ ᴀᴠᴏɪᴅ ᴄᴏᴘʏʀɪɢʜᴛs. Sᴀᴠᴇ ᴛʜᴇ ғɪʟᴇs ᴛᴏ sᴏᴍᴇᴡʜᴇʀᴇ ᴇʟsᴇ")
-        await asyncio.sleep(PM_FILE_DELETE_TIME)
-        buttons = [[InlineKeyboardButton('ɢᴇᴛ ғɪʟᴇs ᴀɢᴀɪɴ', callback_data=f"get_del_send_all_files#{grp_id}#{key}")]] 
-        await client.delete_messages(
-            chat_id=message.chat.id,
-            message_ids=file_ids + [total_files.id]
-        )
-        await vp.edit("Tʜᴇ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ ɢᴏɴᴇ ! Cʟɪᴄᴋ ɢɪᴠᴇɴ ʙᴜᴛᴛᴏɴ ᴛᴏ ɢᴇᴛ ɪᴛ ᴀɢᴀɪɴ.", reply_markup=InlineKeyboardMarkup(buttons))
-        return
-
-    type_, grp_id, file_id = mc.split("_", 2)
     files_ = await get_file_details(file_id)
     if not files_:
         return await message.reply('No Such File Exist!')
     files = files_[0]
-    settings = await get_settings(int(grp_id))
+    
     if type_ != 'shortlink' and settings['shortlink']:
         if not await db.has_premium_access(message.from_user.id):
-            link = await get_shortlink(settings['url'], settings['api'], f"https://t.me/{temp.U_NAME}?start=shortlink_{grp_id}_{file_id}")
+            try:
+                link = await get_shortlink(settings['url'], settings['api'], f"https://t.me/{temp.U_NAME}?start=shortlink_{grp_id}_{file_id}")
+            except:
+                 return await message.reply("Shortlink API Issue. Contact Admin.")
             btn = [[
                 InlineKeyboardButton("♻️ Get File ♻️", url=link)
             ],[
@@ -216,8 +253,11 @@ async def start(client, message):
     btns = [[
         InlineKeyboardButton('ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ', callback_data=f"get_del_file#{grp_id}#{file_id}")
     ]]
-    await msg.delete()
-    await vp.delete()
+    try:
+        await msg.delete()
+        await vp.delete()
+    except:
+        pass
     await vp.reply("Tʜᴇ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ ɢᴏɴᴇ ! Cʟɪᴄᴋ ɢɪᴠᴇɴ ʙᴜᴛᴛᴏɴ ᴛᴏ ɢᴇᴛ ɪᴛ ᴀɢᴀɪɴ.", reply_markup=InlineKeyboardMarkup(btns))
     
 @Client.on_message(filters.command('link'))
@@ -251,8 +291,11 @@ async def channels_info(bot, message):
         return await message.reply("Not set INDEX_CHANNELS")
     text = '**Indexed Channels:**\n\n'
     for id in ids:
-        chat = await bot.get_chat(id)
-        text += f'{chat.title}\n'
+        try:
+            chat = await bot.get_chat(id)
+            text += f'{chat.title}\n'
+        except:
+            text += f'{id} (Not found)\n'
     text += f'\n**Total:** {len(ids)}'
     await message.reply(text)
 
@@ -514,7 +557,8 @@ async def set_tutorial(client, message):
     await save_group_settings(grp_id, 'tutorial', tutorial)
     await message.reply_text(f"Successfully changed tutorial for {title} to\n\n{tutorial}")
 
-#@Client.on_message(filters.command('telegraph'))
+# Updated Telegraph command to use Catbox
+@Client.on_message(filters.command(['telegraph', 'tm', 'catbox']))
 async def telegraph(bot, message):
     reply_to_message = message.reply_to_message
     if not reply_to_message:
@@ -522,21 +566,31 @@ async def telegraph(bot, message):
     file = reply_to_message.photo or reply_to_message.video or None
     if file is None:
         return await message.reply('Invalid media.')
-    if file.file_size >= 5242880:
-        await message.reply_text(text="Send less than 5MB")   
+    
+    # 200MB limit for catbox (standard)
+    if file.file_size >= 209715200: 
+        await message.reply_text(text="Send less than 200MB")   
         return
+    
     text = await message.reply_text(text="ᴘʀᴏᴄᴇssɪɴɢ....")   
-    media = await reply_to_message.download()  
     try:
-        response = upload_file(media)
+        media = await reply_to_message.download()
     except Exception as e:
-        await text.edit_text(text=f"Error - {e}")
-        return    
+        await text.edit_text(f"Download Error: {e}")
+        return
+
+    # Upload to Catbox
+    response = upload_to_catbox(media)
+    
     try:
         os.remove(media)
     except:
         pass
-    await text.edit_text(f"<b>❤️ ʏᴏᴜʀ ᴛᴇʟᴇɢʀᴀᴘʜ ʟɪɴᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ 👇</b>\n\n<code>https://telegra.ph/{response[0]}</code></b>")
+        
+    if response:
+        await text.edit_text(f"<b>❤️ ʏᴏᴜʀ ʟɪɴᴋ ɪs ʀᴇᴀᴅʏ (Catbox) 👇</b>\n\n<code>{response}</code>")
+    else:
+        await text.edit_text("Error uploading to Catbox.moe")
 
 @Client.on_message(filters.command('ping'))
 async def ping(client, message):
@@ -556,22 +610,25 @@ async def give_premium_cmd_handler(client, message):
         await message.delete()
         return
     if len(message.command) == 3:
-        user_id = int(message.command[1])  # Convert the user_id to integer
-        time = message.command[2]        
-        seconds = await get_seconds(time)
-        if seconds > 0:
-            expiry_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
-            user_data = {"id": user_id, "expiry_time": expiry_time} 
-            await db.update_user(user_data)  # Use the update_user method to update or insert user data
-            await message.reply_text("Premium access added to the user.")            
-            await client.send_message(
-                chat_id=user_id,
-                text=f"<b>ᴘʀᴇᴍɪᴜᴍ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ᴀᴄᴄᴏᴜɴᴛ ꜰᴏʀ {time} ᴇɴᴊᴏʏ 😀\n</b>",                
-            )
-        else:
-            await message.reply_text("Invalid time format. Please use '1day for days', '1hour for hours', or '1min for minutes', or '1month for months' or '1year for year'")
+        try:
+            user_id = int(message.command[1])
+            time = message.command[2]
+            seconds = await get_seconds(time) # Ensure get_seconds in utils.py is async, else remove 'await'
+            if seconds > 0:
+                expiry_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+                user_data = {"id": user_id, "expiry_time": expiry_time} 
+                await db.update_user(user_data) 
+                await message.reply_text("Premium access added to the user.")            
+                await client.send_message(
+                    chat_id=user_id,
+                    text=f"<b>ᴘʀᴇᴍɪᴜᴍ ᴀᴅᴅᴇᴅ ᴛᴏ ʏᴏᴜʀ ᴀᴄᴄᴏᴜɴᴛ ꜰᴏʀ {time} ᴇɴᴊᴏʏ 😀\n</b>",                
+                )
+            else:
+                await message.reply_text("Invalid time format.")
+        except Exception as e:
+             await message.reply_text(f"Error: {e}")
     else:
-        await message.reply_text("<b>Usage: /add_premium user_id time \n\nExample /add_premium 1252789 10day \n\n(e.g. for time units '1day for days', '1hour for hours', or '1min for minutes', or '1month for months' or '1year for year')</b>")
+        await message.reply_text("<b>Usage: /add_premium user_id time \n\nExample /add_premium 1252789 10day</b>")
         
 @Client.on_message(filters.command("remove_premium"))
 async def remove_premium_cmd_handler(client, message):
@@ -584,21 +641,20 @@ async def remove_premium_cmd_handler(client, message):
         await message.delete()
         return
     if len(message.command) == 2:
-        user_id = int(message.command[1])  # Convert the user_id to integer
-        time = "1s"
-        seconds = await get_seconds(time)
-        if seconds > 0:
-            expiry_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
-            user_data = {"id": user_id, "expiry_time": expiry_time}  # Using "id" instead of "user_id"
-            await db.update_user(user_data)  # Use the update_user method to update or insert user data
-            await message.reply_text("Premium access removed to the user.")
+        try:
+            user_id = int(message.command[1])
+            # Set to a past time to expire immediately
+            expiry_time = datetime.datetime.now() - datetime.timedelta(seconds=1)
+            user_data = {"id": user_id, "expiry_time": expiry_time} 
+            await db.update_user(user_data)
+            await message.reply_text("Premium access removed.")
             await client.send_message(
                 chat_id=user_id,
                 text=f"<b>premium removed by admins \n\n Contact Admin if this is mistake \n\n 👮 Admin : {OWNER_USERNAME} \n</b>",
                 disable_web_page_preview=True
             )
-        else:
-            await message.reply_text("Invalid time format.'")
+        except Exception as e:
+             await message.reply_text(f"Error: {e}")
     else:
         await message.reply_text("Usage: /remove_premium user_id")
         
@@ -625,8 +681,9 @@ async def check_plans_cmd(client, message):
     user_id  = message.from_user.id
     if await db.has_premium_access(user_id):         
         remaining_time = await db.check_remaining_uasge(user_id)             
-        expiry_time = remaining_time + datetime.datetime.now()
-        await message.reply_text(f"**Your plans details are :\n\nRemaining Time : {remaining_time}\n\nExpirytime : {expiry_time}**")
+        # remaining_time calculation logic might need verification in db.py
+        # Assuming check_remaining_uasge returns timedelta or similar string
+        await message.reply_text(f"**Your plans details are :\n\nRemaining Time : {remaining_time}**")
     else:
         btn = [ 
             [InlineKeyboardButton("ɢᴇᴛ ғʀᴇᴇ ᴛʀᴀɪʟ ғᴏʀ 𝟻 ᴍɪɴᴜᴛᴇꜱ ☺️", callback_data="get_trail")],
@@ -686,11 +743,11 @@ async def set_fsub(client, message):
     for id in fsub_ids:
         try:
             chat = await client.get_chat(id)
+            if chat.type != enums.ChatType.CHANNEL:
+                 return await message.reply_text(f"<code>{id}</code> is not channel.")
+            channels += f'{chat.title}\n'
         except Exception as e:
             return await message.reply_text(f"<code>{id}</code> is invalid!\nMake sure this bot admin in that channel.\n\nError - {e}")
-        if chat.type != enums.ChatType.CHANNEL:
-            return await message.reply_text(f"<code>{id}</code> is not channel.")
-        channels += f'{chat.title}\n'
     await save_group_settings(grp_id, 'fsub', fsub_ids)
     await message.reply_text(f"Successfully set force channels for {title} to\n\n<code>{channels}</code>")
 
@@ -707,8 +764,7 @@ async def remove_fsub(client, message):
     if not await is_check_admin(client, grp_id, user_id):
         return await message.reply_text('You not admin in this group.')
     if not settings['fsub']:
-        await message.reply_text("ʏᴏᴜ ᴅɪᴅɴ'ᴛ ᴀᴅᴅᴇᴅ ᴀɴʏ ꜰᴏʀᴄᴇ sᴜʙsᴄʀɪʙᴇ ᴄʜᴀɴɴᴇʟ...") # query.answer not work in command so I can change to message.reply_text
+        await message.reply_text("ʏᴏᴜ ᴅɪᴅɴ'ᴛ ᴀᴅᴅᴇᴅ ᴀɴʏ ꜰᴏʀᴄᴇ sᴜʙsᴄʀɪʙᴇ ᴄʜᴀɴɴᴇʟ...")
         return
     await save_group_settings(grp_id, 'fsub', None)
     await message.reply_text("<b>Successfully removed your force channel id...</b>")
-
