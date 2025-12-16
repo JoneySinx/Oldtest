@@ -267,6 +267,9 @@ async def get_seconds(time_string):
     
     value, unit = extract_value_and_unit(time_string)
     
+    # Clean up the unit string (remove spaces, convert to lowercase)
+    unit = unit.strip().lower()
+
     if unit in ['s', 'sec', 'secs']:
         return value
     elif unit in ['min', 'mins', 'm']:
@@ -281,3 +284,4 @@ async def get_seconds(time_string):
         return value * 86400 * 365
     else:
         return 0
+
